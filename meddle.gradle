@@ -1,0 +1,184 @@
+buildscript {
+	repositories {
+		mavenCentral()
+	}
+	dependencies {
+		classpath 'de.undercouch:gradle-download-task:2.0.0'
+	}
+}
+
+apply plugin: de.undercouch.gradle.tasks.download.DownloadTaskPlugin
+
+import de.undercouch.gradle.tasks.download.Download
+
+repositories {
+	maven {
+		url "https://libraries.minecraft.net/"
+	}
+	maven {
+		url "http://www.fybertech.net/maven/"
+	}
+
+	mavenCentral()
+}
+
+configurations {
+	compileonly
+	runmods
+}
+
+def buildTmpDir = new File(buildDir, 'tmp')
+def runDir = new File('run')
+def mcObfJar = new File(buildTmpDir, 'minecraft-' + project.ext.mcversion + '.jar')
+def mcDeobfJar = new File(buildTmpDir, 'minecraft-deobf-' + project.ext.mcversion + '.jar')
+
+dependencies {
+	compile 'net.minecraft:launchwrapper:1.12'
+	compile 'org.ow2.asm:asm-debug-all:5.0.3'
+
+	compile 'oshi-project:oshi-core:1.1'
+	compile 'net.java.dev.jna:jna:3.4.0'
+	compile 'net.java.dev.jna:platform:3.4.0'
+	compile 'com.ibm.icu:icu4j-core-mojang:51.2'
+	compile 'net.sf.jopt-simple:jopt-simple:4.6'
+	compile 'com.paulscode:codecjorbis:20101023'
+	compile 'com.paulscode:codecwav:20101023'
+	compile 'com.paulscode:libraryjavasound:20101123'
+	compile 'com.paulscode:librarylwjglopenal:20100824'
+	compile 'com.paulscode:soundsystem:20120107'
+	compile 'io.netty:netty-all:4.0.23.Final'
+	compile 'com.google.guava:guava:17.0'
+	compile 'org.apache.commons:commons-lang3:3.3.2'
+	compile 'commons-io:commons-io:2.4'
+	compile 'commons-codec:commons-codec:1.9'
+	compile 'net.java.jinput:jinput:2.0.5'
+	compile 'net.java.jutils:jutils:1.0.0'
+	compile 'com.google.code.gson:gson:2.2.4'
+	compile 'com.mojang:authlib:1.5.21'
+	compile 'com.mojang:realms:1.7.24'
+	compile 'org.apache.commons:commons-compress:1.8.1'
+	compile 'org.apache.httpcomponents:httpclient:4.3.3'
+	compile 'commons-logging:commons-logging:1.1.3'
+	compile 'org.apache.httpcomponents:httpcore:4.3.2'
+	compile 'org.apache.logging.log4j:log4j-api:2.0-beta9'
+	compile 'org.apache.logging.log4j:log4j-core:2.0-beta9'
+	compile 'org.lwjgl.lwjgl:lwjgl:2.9.4-nightly-20150209'
+	compile 'org.lwjgl.lwjgl:lwjgl_util:2.9.4-nightly-20150209'
+	compile 'org.lwjgl.lwjgl:lwjgl-platform:2.9.4-nightly-20150209'
+
+	compileonly files(mcDeobfJar)
+
+	compileonly 'net.fybertech:meddleapi:1.0.4'
+	compileonly 'net.fybertech:dynamicmappings:013'
+
+	runmods 'net.fybertech:meddleapi:1.0.4'
+	runmods 'net.fybertech:dynamicmappings:013'
+
+	runtime 'net.fybertech:meddle:1.2.2'
+}
+
+eclipse {
+	classpath {
+		plusConfigurations += [ configurations.compileonly ]
+	}
+}
+
+// Functions
+
+def getDynamicMappingsJar() {
+	def dynMappingsJar = null
+	configurations.compile.each { jarPath ->
+		if (jarPath.toString().contains('dynamicmappings'))
+			dynMappingsJar = jarPath
+	}
+	return dynMappingsJar.toString()
+}
+
+def getNativesLwjglJar() {
+	def nativesLwjglJar = null
+	configurations.compile.each { jarPath ->
+		if (jarPath.toString().contains('natives-linux'))
+			nativesLwjglJar = jarPath
+	}
+	return nativesLwjglJar.toString()
+}
+
+// Tasks
+
+task downloadMinecraft (type: Download) {
+	src 'http://s3.amazonaws.com/Minecraft.Download/versions/' + project.ext.mcversion + '/' + project.ext.mcversion + '.jar'
+	dest mcObfJar
+	overwrite false
+}
+
+task remapMinecraft (type: JavaExec, dependsOn: downloadMinecraft) {
+	workingDir buildTmpDir
+	classpath project.configurations.compile
+	classpath project.configurations.compileonly
+	classpath mcObfJar
+	classpath project.configurations.runtime
+	main 'net.fybertech.dynamicmappings.DynamicRemap'
+
+	onlyIf { !mcDeobfJar.exists() }
+	doLast {
+		new File(buildTmpDir, 'mcremapped.jar').renameTo(mcDeobfJar)
+	}
+}
+
+task extractNativeLwjglLibs (type: Copy) {
+	from (zipTree(getNativesLwjglJar())) { 
+		exclude 'META-INF/**'
+	}
+	into 'build/natives/'
+}
+
+task installMods (type: Copy) {
+	from configurations.runmods
+	into new File(runDir, 'meddle')
+}
+
+task generateEclipseLaunch << {
+	new File(runDir, project.name + '_Client.launch').withWriter { w ->
+		w << '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
+		w << '<launchConfiguration type="org.eclipse.jdt.launching.localJavaApplication">\n'
+		w << '	<listAttribute key="org.eclipse.jdt.launching.CLASSPATH">\n'
+		w << '		<listEntry value="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot; standalone=&quot;no&quot;?&gt;&#10;&lt;runtimeClasspathEntry containerPath=&quot;org.eclipse.jdt.launching.JRE_CONTAINER&quot; javaProject=&quot;' + project.name + '&quot; path=&quot;1&quot; type=&quot;4&quot;/&gt;&#10;"/>\n'
+		w << '		<listEntry value="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot; standalone=&quot;no&quot;?&gt;&#10;&lt;runtimeClasspathEntry path=&quot;3&quot; projectName=&quot;' + project.name + '&quot; type=&quot;1&quot;/&gt;&#10;"/>\n'
+		configurations.runtime.each { jar ->
+			w << '		<listEntry value="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot; standalone=&quot;no&quot;?&gt;&#10;&lt;runtimeClasspathEntry externalArchive=&quot;' + jar.toString() + '&quot; path=&quot;3&quot; type=&quot;2&quot;/&gt;&#10;"/>\n'
+		}
+		w << '		<listEntry value="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot; standalone=&quot;no&quot;?&gt;&#10;&lt;runtimeClasspathEntry externalArchive=&quot;' + buildDir.toString() + '/tmp/minecraft-' + mcversion + '.jar&quot; path=&quot;3&quot; type=&quot;2&quot;/&gt;&#10;"/>\n'
+		w << '	</listAttribute>\n'
+		w << '	<booleanAttribute key="org.eclipse.jdt.launching.DEFAULT_CLASSPATH" value="false"/>\n'
+		w << '	<stringAttribute key="org.eclipse.jdt.launching.MAIN_TYPE" value="net.minecraft.launchwrapper.Launch"/>\n'
+		w << '	<stringAttribute key="org.eclipse.jdt.launching.PROGRAM_ARGUMENTS" value="--accessToken token --version ' + mcversion + ' --tweakClass net.fybertech.meddle.Meddle"/>\n'
+		w << '	<stringAttribute key="org.eclipse.jdt.launching.PROJECT_ATTR" value="' + project.name + '"/>\n'
+		w << '	<stringAttribute key="org.eclipse.jdt.launching.VM_ARGUMENTS" value="-Dorg.lwjgl.librarypath=${workspace_loc:' + project.name + '/build/natives}"/>\n'
+		w << '	<stringAttribute key="org.eclipse.jdt.launching.WORKING_DIRECTORY" value="${workspace_loc:' + project.name + '/run}"/>\n'
+		w << '</launchConfiguration>'
+	}
+}
+
+task generateDummyJar << {
+	def metaInfDir = new File(buildTmpDir, 'META-INF')
+	if (!metaInfDir.exists())
+		metaInfDir.mkdirs()
+	def manifestFile = new File(metaInfDir, 'MANIFEST.MF')
+	manifestFile.withWriter { w ->
+		jar.manifest.getAttributes().each { k, v ->
+			w << k + ': ' + v + '\n'
+		}
+	}
+	task (writeDummyJar, type: Zip, overwrite: true) {
+		into ('META-INF') {
+			from files(manifestFile)
+		}
+		archiveName 'dummy.jar'
+		destinationDir new File(runDir, 'meddle')
+	}.execute()
+}
+
+task setup (dependsOn: [remapMinecraft, extractNativeLwjglLibs, generateEclipseLaunch, installMods, generateDummyJar]) << {
+}
+
+tasks['eclipseClasspath'].dependsOn setup
