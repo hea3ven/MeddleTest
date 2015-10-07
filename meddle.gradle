@@ -4,33 +4,47 @@ buildscript {
 	}
 	dependencies {
 		classpath 'de.undercouch:gradle-download-task:2.0.0'
+		classpath 'org.bitbucket.mstrobel:procyon-compilertools:0.5.32'
 	}
 }
 
-apply plugin: de.undercouch.gradle.tasks.download.DownloadTaskPlugin
+//apply plugin: de.undercouch.gradle.tasks.download.DownloadTaskPlugin
 
+import java.util.jar.JarFile
+
+import com.strobel.assembler.metadata.JarTypeLoader
+import com.strobel.decompiler.Decompiler
+import com.strobel.decompiler.DecompilerSettings
+import com.strobel.decompiler.PlainTextOutput
 import de.undercouch.gradle.tasks.download.Download
 
+def buildTmpDir = new File(buildDir, 'tmp')
+def buildRepoDir = new File(buildDir, 'repo')
+def runDir = new File('run')
+def mcObfJar = new File(buildRepoDir, 'minecraft-' + project.ext.mcversion + '-obf.jar')
+def mcDeobfJar = new File(buildRepoDir, 'minecraft-' + project.ext.mcversion + '.jar')
+def mcSrcDir = new File(buildTmpDir, 'mcSrc-' + project.ext.mcversion)
+def mcSrcJar = new File(buildRepoDir, 'minecraft-' + project.ext.mcversion + '-sources.jar')
+
 repositories {
+	flatDir {
+		dirs buildRepoDir.toString()
+	}
 	maven {
 		url "https://libraries.minecraft.net/"
 	}
 	maven {
 		url "http://www.fybertech.net/maven/"
 	}
-
 	mavenCentral()
 }
 
 configurations {
 	compileonly
+	compilemc
+	runtimemc
 	runmods
 }
-
-def buildTmpDir = new File(buildDir, 'tmp')
-def runDir = new File('run')
-def mcObfJar = new File(buildTmpDir, 'minecraft-' + project.ext.mcversion + '.jar')
-def mcDeobfJar = new File(buildTmpDir, 'minecraft-deobf-' + project.ext.mcversion + '.jar')
 
 dependencies {
 	compile 'net.minecraft:launchwrapper:1.12'
@@ -66,7 +80,7 @@ dependencies {
 	compile 'org.lwjgl.lwjgl:lwjgl_util:2.9.4-nightly-20150209'
 	compile 'org.lwjgl.lwjgl:lwjgl-platform:2.9.4-nightly-20150209'
 
-	compileonly files(mcDeobfJar)
+	compilemc ':minecraft:' + project.ext.mcversion
 
 	compileonly 'net.fybertech:meddleapi:1.0.4'
 	compileonly 'net.fybertech:dynamicmappings:013'
@@ -74,11 +88,13 @@ dependencies {
 	runmods 'net.fybertech:meddleapi:1.0.4'
 	runmods 'net.fybertech:dynamicmappings:013'
 
+	runtimemc ':minecraft:' + project.ext.mcversion + '-obf'
 	runtime 'net.fybertech:meddle:1.2.2'
 }
 
 eclipse {
 	classpath {
+		plusConfigurations += [ configurations.compilemc ]
 		plusConfigurations += [ configurations.compileonly ]
 	}
 }
@@ -125,6 +141,36 @@ task remapMinecraft (type: JavaExec, dependsOn: downloadMinecraft) {
 	}
 }
 
+task decompileMinecraft (dependsOn: remapMinecraft) << {
+	def jar = new JarFile(mcDeobfJar)
+	def settings = new DecompilerSettings()
+	settings.setTypeLoader(new JarTypeLoader(jar))
+
+	if (!mcSrcDir.exists())
+		mcSrcDir.mkdirs()
+
+	jar.entries().each { entry ->
+		if (!entry.toString().endsWith('.class') && !entry.toString().contains('$'))
+			return;
+		def entryName = entry.toString().replace('.class', '')
+		def outFile = new File(mcSrcDir, entryName + '.java')
+		if (!outFile.parentFile.exists())
+			outFile.parentFile.mkdirs()
+		outFile.withWriter { w ->
+			Decompiler.decompile(entryName, new PlainTextOutput(w), settings);
+		}
+	}
+
+}
+decompileMinecraft.onlyIf { !mcSrcDir.exists() }
+
+task packageMinecraftSources (type: Zip, dependsOn: decompileMinecraft) {
+	from fileTree(mcSrcDir)
+	archiveName mcSrcJar.name
+	destinationDir buildRepoDir
+	onlyIf { !mcSrcJar.exists() }
+}
+
 task extractNativeLwjglLibs (type: Copy) {
 	from (zipTree(getNativesLwjglJar())) { 
 		exclude 'META-INF/**'
@@ -137,7 +183,7 @@ task installMods (type: Copy) {
 	into new File(runDir, 'meddle')
 }
 
-task generateEclipseLaunch << {
+task generateEclipseLaunch (dependsOn: remapMinecraft) << {
 	new File(runDir, project.name + '_Client.launch').withWriter { w ->
 		w << '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
 		w << '<launchConfiguration type="org.eclipse.jdt.launching.localJavaApplication">\n'
@@ -147,7 +193,9 @@ task generateEclipseLaunch << {
 		configurations.runtime.each { jar ->
 			w << '		<listEntry value="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot; standalone=&quot;no&quot;?&gt;&#10;&lt;runtimeClasspathEntry externalArchive=&quot;' + jar.toString() + '&quot; path=&quot;3&quot; type=&quot;2&quot;/&gt;&#10;"/>\n'
 		}
-		w << '		<listEntry value="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot; standalone=&quot;no&quot;?&gt;&#10;&lt;runtimeClasspathEntry externalArchive=&quot;' + buildDir.toString() + '/tmp/minecraft-' + mcversion + '.jar&quot; path=&quot;3&quot; type=&quot;2&quot;/&gt;&#10;"/>\n'
+		configurations.runtimemc.each { jar ->
+			w << '		<listEntry value="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot; standalone=&quot;no&quot;?&gt;&#10;&lt;runtimeClasspathEntry externalArchive=&quot;' + jar.toString() + '&quot; path=&quot;3&quot; type=&quot;2&quot;/&gt;&#10;"/>\n'
+		}
 		w << '	</listAttribute>\n'
 		w << '	<booleanAttribute key="org.eclipse.jdt.launching.DEFAULT_CLASSPATH" value="false"/>\n'
 		w << '	<stringAttribute key="org.eclipse.jdt.launching.MAIN_TYPE" value="net.minecraft.launchwrapper.Launch"/>\n'
@@ -178,7 +226,7 @@ task generateDummyJar << {
 	}.execute()
 }
 
-task setup (dependsOn: [remapMinecraft, extractNativeLwjglLibs, generateEclipseLaunch, installMods, generateDummyJar]) << {
+task setup (dependsOn: [packageMinecraftSources, extractNativeLwjglLibs, generateEclipseLaunch, installMods, generateDummyJar]) << {
 }
 
 tasks['eclipseClasspath'].dependsOn setup
