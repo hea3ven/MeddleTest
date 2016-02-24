@@ -82,14 +82,14 @@ dependencies {
 
 	compilemc ':minecraft:' + project.ext.mcversion
 
-	compileonly 'net.fybertech:meddleapi:1.0.4'
-	compileonly 'net.fybertech:dynamicmappings:013'
+	compileonly 'net.fybertech:meddleapi:1.0.6'
+	compileonly 'net.fybertech:dynamicmappings:023'
 
-	runmods 'net.fybertech:meddleapi:1.0.4'
-	runmods 'net.fybertech:dynamicmappings:013'
+	runmods 'net.fybertech:meddleapi:1.0.6'
+	runmods 'net.fybertech:dynamicmappings:023'
 
 	runtimemc ':minecraft:' + project.ext.mcversion + '-obf'
-	runtime 'net.fybertech:meddle:1.2.2'
+	runtime 'net.fybertech:meddle:1.3'
 }
 
 eclipse {

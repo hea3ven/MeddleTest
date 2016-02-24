@@ -4,7 +4,7 @@ plugins {
 
 apply plugin: 'java'
 apply plugin: 'eclipse'
-project.ext.mcversion = "15w40b"
+project.ext.mcversion = '1.9-pre2'
 apply from: 'meddle.gradle'
 
 sourceSets.main {
